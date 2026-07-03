@@ -1,0 +1,158 @@
+{
+    "title": "Demo Observabilidad",
+    "uid": "observabilidad-demo",
+    "version": 1,
+    "schemaVersion": 38,
+    "refresh": "5s",
+    "time": { "from": "now-15m", "to": "now" },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Total Requests",
+        "type": "stat",
+        "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area",
+          "textMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "thresholds" },
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 50 },
+                { "color": "red", "value": 100 }
+              ]
+            }
+          }
+        },
+        "targets": [
+          {
+            "expr": "sum(increase(demo_api_requests_total[5m]))",
+            "legendFormat": "Requests (5m)"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Errores",
+        "type": "stat",
+        "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "options": { "colorMode": "background" },
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "thresholds" },
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "red", "value": 1 }
+              ]
+            }
+          }
+        },
+        "targets": [
+          {
+            "expr": "sum(increase(demo_api_errors_total[5m])) or vector(0)",
+            "legendFormat": "Errores (5m)"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Órdenes creadas",
+        "type": "stat",
+        "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "options": { "colorMode": "background" },
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "thresholds" },
+            "thresholds": {
+              "steps": [{ "color": "blue", "value": null }]
+            }
+          }
+        },
+        "targets": [
+          {
+            "expr": "sum(increase(demo_api_orders_created_total[5m])) or vector(0)",
+            "legendFormat": "Órdenes (5m)"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Requests por segundo por endpoint",
+        "type": "timeseries",
+        "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "fieldConfig": {
+          "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+        },
+        "targets": [
+          {
+            "expr": "sum by (endpoint) (rate(demo_api_requests_total[1m]))",
+            "legendFormat": "{{endpoint}}"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Errores por segundo",
+        "type": "timeseries",
+        "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "fieldConfig": {
+          "defaults": {
+            "color": { "fixedColor": "red", "mode": "fixed" },
+            "custom": { "lineWidth": 2, "fillOpacity": 20 }
+          }
+        },
+        "targets": [
+          {
+            "expr": "sum(rate(demo_api_errors_total[1m])) or vector(0)",
+            "legendFormat": "Errores/s"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Logs en tiempo real",
+        "type": "logs",
+        "gridPos": { "x": 0, "y": 12, "w": 24, "h": 8 },
+        "datasource": { "type": "loki", "uid": "${DS_LOKI}" },
+        "options": {
+          "showTime": true,
+          "showLabels": true,
+          "wrapLogMessage": true,
+          "sortOrder": "Descending"
+        },
+        "targets": [
+          {
+            "expr": "{job=\"demo-api\"} |= ``",
+            "legendFormat": ""
+          }
+        ]
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "DS_PROMETHEUS",
+          "type": "datasource",
+          "pluginId": "prometheus",
+          "hide": 2
+        },
+        {
+          "name": "DS_LOKI",
+          "type": "datasource",
+          "pluginId": "loki",
+          "hide": 2
+        }
+      ]
+    }
+  }
+  

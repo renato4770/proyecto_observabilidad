@@ -1,0 +1,85 @@
+services:
+
+  # ── Tu API instrumentada ──────────────────────────────────────────────────
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    depends_on:
+      - otel-collector
+    restart: unless-stopped
+
+  # ── Cliente web del compañero ─────────────────────────────────────────────
+  client:
+    build: ./client
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # ── OTel Collector: recibe y enruta trazas, métricas y logs ──────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.102.0
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./otel-collector/config.yaml:/etc/otel/config.yaml
+    ports:
+      - "4317:4317"   # gRPC (recibe señales de la API)
+      - "4318:4318"   # HTTP
+      - "8889:8889"   # Prometheus scrape endpoint
+    restart: unless-stopped
+
+  # ── Jaeger: visualiza trazas distribuidas ────────────────────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:1.58
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317"          # gRPC interno (solo entre contenedores)
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    restart: unless-stopped
+
+  # ── Prometheus: almacena métricas ────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  # ── Loki: almacena logs ───────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.0.0
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+
+  # ── Grafana: dashboard unificado ──────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.0.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/etc/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+      - jaeger
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:
