@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>API Client</title>
+</head>
+<body>
+  <h1>API Client</h1>
+
+  <div>
+    <span>Total requests: <strong id="total">0</strong></span>
+    <span>Successful: <strong id="successful">0</strong></span>
+    <span>Errors: <strong id="errors">0</strong></span>
+  </div>
+
+  <h2>Actions</h2>
+  <button onclick="callApi('GET', '/users/1')">GET /users/1</button>
+  <button onclick="callApi('GET', '/users/2')">GET /users/2</button>
+  <button onclick="callApi('POST', '/orders')">POST /orders</button>
+  <button onclick="callApi('GET', '/health')">GET /health</button>
+  <button onclick="callApi('GET', '/fail')" style="color: red;">GET /fail</button>
+  <button onclick="toggleAuto()" id="autoBtn">Start Auto</button>
+
+  <h2>Log</h2>
+  <table border="1">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Method</th>
+        <th>Route</th>
+        <th>Status</th>
+        <th>Latency (ms)</th>
+      </tr>
+    </thead>
+    <tbody id="log">
+    </tbody>
+  </table>
+
+  <script>
+    const API = "http://localhost:8000";
+    let total = 0, successful = 0, errors = 0;
+    let autoInterval = null;
+
+    const autoRoutes = [
+      { method: "GET", route: "/users/1" },
+      { method: "GET", route: "/users/2" },
+      { method: "POST", route: "/orders" },
+      { method: "GET", route: "/health" },
+      { method: "GET", route: "/fail" },
+    ];
+    let autoIndex = 0;
+
+    function toggleAuto() {
+      const btn = document.getElementById("autoBtn");
+      if (autoInterval) {
+        clearInterval(autoInterval);
+        autoInterval = null;
+        btn.textContent = "Start Auto";
+      } else {
+        autoInterval = setInterval(() => {
+          const { method, route } = autoRoutes[autoIndex % autoRoutes.length];
+          callApi(method, route);
+          autoIndex++;
+        }, 800);
+        btn.textContent = "Stop Auto";
+      }
+    }
+
+    function callApi(method, route) {
+      const start = performance.now();
+
+      fetch(API + route, { method: method })
+        .then(res => {
+          const latency = (performance.now() - start).toFixed(2);
+          addLog(method, route, res.status, latency, res.ok);
+        })
+        .catch(err => {
+          const latency = (performance.now() - start).toFixed(2);
+          addLog(method, route, "Error", latency, false);
+        });
+    }
+
+    function addLog(method, route, status, latency, success) {
+      total++;
+      if (success) successful++;
+      else errors++;
+
+      document.getElementById("total").textContent = total;
+      document.getElementById("successful").textContent = successful;
+      document.getElementById("errors").textContent = errors;
+
+      const time = new Date().toLocaleTimeString();
+      const row = document.createElement("tr");
+      row.style.color = success ? "green" : "red";
+      row.innerHTML = `
+        <td>${time}</td>
+        <td>${method}</td>
+        <td>${route}</td>
+        <td>${status}</td>
+        <td>${latency}</td>
+      `;
+
+      document.getElementById("log").prepend(row);
+    }
+  </script>
+
+</body>
+</html>
