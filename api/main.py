@@ -1,8 +1,9 @@
 import logging
 import random
 import time
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 # ── OpenTelemetry setup ───────────────────────────────────────────────────────
@@ -13,11 +14,6 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry._logs import set_logger_provider
-from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
 
 OTEL_ENDPOINT = "http://otel-collector:4317"
 
@@ -38,35 +34,26 @@ meter_provider = MeterProvider(metric_readers=[metric_reader])
 metrics.set_meter_provider(meter_provider)
 meter = metrics.get_meter(__name__)
 
-# Counters
-request_counter = meter.create_counter(
-    "api.requests.total",
-    description="Total number of requests",
-)
-error_counter = meter.create_counter(
-    "api.errors.total",
-    description="Total number of errors",
-)
-order_counter = meter.create_counter(
-    "api.orders.created",
-    description="Total orders created",
-)
+request_counter = meter.create_counter("api.requests.total", description="Total requests")
+error_counter   = meter.create_counter("api.errors.total",   description="Total errors")
+order_counter   = meter.create_counter("api.orders.created", description="Orders created")
 
-# Logs → OTel
-logger_provider = LoggerProvider()
-logger_provider.add_log_record_processor(
-    BatchLogRecordProcessor(OTLPLogExporter(endpoint=OTEL_ENDPOINT, insecure=True))
-)
-set_logger_provider(logger_provider)
-
-logging.basicConfig(level=logging.INFO)
-handler = LoggingHandler(level=logging.INFO, logger_provider=logger_provider)
+# Logs — stdlib solamente (sin OTel logs para evitar el bug)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("api")
-logger.addHandler(handler)
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Demo Observabilidad")
-FastAPIInstrumentor.instrument_app(app)
+
+# Middleware manual para trazas por request (reemplaza FastAPIInstrumentor)
+@app.middleware("http")
+async def tracing_middleware(request: Request, call_next):
+    with tracer.start_as_current_span(f"{request.method} {request.url.path}") as span:
+        span.set_attribute("http.method", request.method)
+        span.set_attribute("http.path", request.url.path)
+        response = await call_next(request)
+        span.set_attribute("http.status_code", response.status_code)
+        return response
 
 # ── Modelos ───────────────────────────────────────────────────────────────────
 class Order(BaseModel):
@@ -74,7 +61,6 @@ class Order(BaseModel):
     qty: int
     user_id: int = 1
 
-# Datos en memoria para el demo
 USERS = {
     1: {"id": 1, "name": "Ana García",   "email": "ana@demo.com",   "plan": "premium"},
     2: {"id": 2, "name": "Carlos López", "email": "carlos@demo.com","plan": "basic"},
@@ -84,45 +70,33 @@ orders_db = []
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
-    request_counter.add(1, {"endpoint": "/health", "method": "GET"})
+    request_counter.add(1, {"endpoint": "/health"})
     logger.info("Health check OK")
     return {"status": "ok", "service": "demo-observabilidad"}
 
 
 @app.get("/users/{user_id}")
 def get_user(user_id: int):
-    request_counter.add(1, {"endpoint": "/users", "method": "GET"})
-
+    request_counter.add(1, {"endpoint": "/users"})
     with tracer.start_as_current_span("get-user-from-db") as span:
         span.set_attribute("user.id", user_id)
-
-        # Simula latencia de base de datos
         time.sleep(random.uniform(0.05, 0.15))
-
         user = USERS.get(user_id)
         if not user:
             error_counter.add(1, {"endpoint": "/users", "reason": "not_found"})
             logger.warning(f"User {user_id} not found")
             raise HTTPException(status_code=404, detail=f"User {user_id} not found")
-
-        span.set_attribute("user.name", user["name"])
-        span.set_attribute("user.plan", user["plan"])
         logger.info(f"User {user_id} retrieved: {user['name']}")
         return user
 
 
 @app.post("/orders", status_code=201)
 def create_order(order: Order):
-    request_counter.add(1, {"endpoint": "/orders", "method": "POST"})
-
+    request_counter.add(1, {"endpoint": "/orders"})
     with tracer.start_as_current_span("create-order") as span:
         span.set_attribute("order.product", order.product)
         span.set_attribute("order.qty", order.qty)
-        span.set_attribute("order.user_id", order.user_id)
-
-        # Simula procesamiento
         time.sleep(random.uniform(0.1, 0.25))
-
         new_order = {
             "id": len(orders_db) + 1,
             "product": order.product,
@@ -138,12 +112,9 @@ def create_order(order: Order):
 
 @app.get("/fail")
 def force_error():
-    """Endpoint que falla intencionalmente — para el demo en vivo."""
-    request_counter.add(1, {"endpoint": "/fail", "method": "GET"})
+    request_counter.add(1, {"endpoint": "/fail"})
     error_counter.add(1, {"endpoint": "/fail", "reason": "intentional"})
-
     with tracer.start_as_current_span("intentional-error") as span:
         span.set_attribute("error", True)
-        span.set_attribute("error.type", "intentional_demo_error")
         logger.error("Intentional error triggered for demo")
         raise HTTPException(status_code=500, detail="Error intencional para el demo")
