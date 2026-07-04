@@ -12,6 +12,10 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry._logs import set_logger_provider
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 
@@ -39,8 +43,17 @@ error_counter   = meter.create_counter("api.errors.total",   description="Total 
 order_counter   = meter.create_counter("api.orders.created", description="Orders created")
 
 # Logs — stdlib solamente (sin OTel logs para evitar el bug)
+# Logs → OTel Collector → Loki
+logger_provider = LoggerProvider()
+logger_provider.add_log_record_processor(
+    BatchLogRecordProcessor(OTLPLogExporter(endpoint=OTEL_ENDPOINT, insecure=True))
+)
+set_logger_provider(logger_provider)
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+handler = LoggingHandler(level=logging.INFO, logger_provider=logger_provider)
 logger = logging.getLogger("api")
+logger.addHandler(handler)
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Demo Observabilidad")
